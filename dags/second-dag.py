@@ -1,52 +1,50 @@
-from airflow.providers.apache.kafka.operators.consume import ConsumeFromTopicOperator
-from airflow import DAG, Dataset
-from airflow.decorators import task
-import trafilatura
-
-from airflow.models import Variable
-from kafka import KafkaConsumer, KafkaProducer
 import json
-from trafilatura import fetch_url, extract
+from datetime import datetime
 
-server1 = Variable.get("kafka-1")
-server2 = Variable.get("kafka-2")
-server3 = Variable.get("kafka-3")
+from airflow import DAG
+from airflow.decorators import task
 
-producer = KafkaProducer(bootstrap_servers=[server1,server2,server3],value_serializer= lambda x: json.dumps(x).encode('utf-8'))
+@task
+def extract():
+    """
+    Pushes the estimated population (in millions) of
+    various cities into XCom for the ETL pipeline.
+    Obviously in reality this would be fetching this
+    data from some source, not hardcoded values.
+    """
+    sample_data = {"Tokyo": 3.7, "Jakarta": 3.3, "Delhi": 2.9}
+    return json.dumps(sample_data)
 
-from datetime import date, datetime
 
-# news_links = Dataset("/tmp/news_links.txt")
+@task
+def transform(raw_data: str):
+    """
+    Loads the provided raw data from XCom and pushes
+    the name of the largest city in the set to XCom.
+    """
+    data = json.loads(raw_data)
+
+    largest_city = max(data, key=data.get)
+    return largest_city
 
 
+@task
+def load(largest_city):
+    """
+    Prints the name of the largest city in
+    the set as determined by the transform.
+    """
+    print(largest_city)
 
-def webScrape(message):
-    data = json.loads(json.loads(message.value())["content"])[0]
-    if data["T"] == "n":
-        url = data["url"]
-        downloaded = fetch_url(url)
-        text = extract(downloaded)
-         
-        result = {}
-        result["headline"] = data["headline"]
-        result["created_at"] = data["created_at"]
-        result["updated_at"] = data["updated_at"]
-        result["symbols"] = data["symbols"]
-        result["content"] = text
-        producer.send("processedNews", result)
 
 with DAG(
-    dag_id = "kafka_raw_producer_links",
-    schedule = "@daily",
-    start_date = datetime(2023, 9, 7),
-    catchup = False
-):
-    consume_raw_news = ConsumeFromTopicOperator(
-        task_id="consume_raw_news",
-        kafka_config_id="kafka",
-        topics=["bronzeNews"],
-        apply_function=webScrape,
-        poll_timeout=60,
-        max_batch_size=20,
-        # outlets=[news_links],
-    )
+    dag_id="city_pop_etl_taskflow",
+    schedule=None,
+    start_date=datetime(2021, 1, 1),
+    catchup=False,
+    tags=["example"],
+) as dag:
+
+    extracted_data = extract()
+    largest_city = transform(extracted_data)
+    load(largest_city)
